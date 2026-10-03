@@ -11,7 +11,7 @@
     {
       "name": "minefield",
       "source": "./minefield",
-      "description": "The classic mine-clearing puzzle in a pane: click or use the keys to clear the board. Three levels, a timer, best times, and a face that watches the board and glances over at Claude's work."
+      "description": "The classic mine-clearing puzzle in a pane: click or use the keys to clear the board. A timer, a best time, and a face that watches the board and glances over at Claude's work."
     }
   ]
 }

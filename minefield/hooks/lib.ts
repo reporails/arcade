@@ -1,23 +1,10 @@
 // minefield: the game itself. Pure functions over plain data, so the hooks
 // module, the board and the tests share them. A game is JSON all the way down.
 
-export type LevelName = 'beginner' | 'intermediate' | 'expert'
-
-export type Level = {
-  label: string
-  hotkey: string
-  cols: number
-  rows: number
-  mines: number
-}
-
-export const LEVELS: Readonly<Record<LevelName, Level>> = {
-  beginner: { label: 'Beginner', hotkey: 'b', cols: 9, rows: 9, mines: 10 },
-  intermediate: { label: 'Intermediate', hotkey: 'i', cols: 16, rows: 16, mines: 40 },
-  expert: { label: 'Expert', hotkey: 'e', cols: 30, rows: 16, mines: 99 },
-}
-
-export const LEVEL_NAMES = Object.keys(LEVELS) as readonly LevelName[]
+// One board, 9×9 with 10 mines: a game for the few minutes Claude works.
+const COLS = 9
+const ROWS = 9
+const MINES = 10
 
 export const HIDDEN = 0
 export const OPEN = 1
@@ -29,7 +16,6 @@ export type Status = 'ready' | 'playing' | 'won' | 'lost'
 
 export type Game = {
   id: number
-  level: LevelName
   cols: number
   rows: number
   mines: number
@@ -77,8 +63,8 @@ export type Mood = {
   reactUntil: number
 }
 
-// Seconds per level name. A plain string-keyed record, so it travels as JSON.
-export type Best = Readonly<Record<string, number>>
+// The best time in seconds, or null before the first win.
+export type Best = number | null
 
 export type MoveType = 'up' | 'down' | 'left' | 'right' | 'reveal' | 'flag' | 'new'
 
@@ -94,12 +80,10 @@ export type Style = {
 
 export type Run = { text: string; style: Style }
 
-export type Win = { level: LevelName; seconds: number }
+export type Win = { seconds: number }
 
-// What the board reports to the hooks module. A later post in the same frame
-// replaces an earlier one, so every post carries the latest win as well:
-// recording a win twice is harmless, losing one is not.
-export type Message = { won: Win | null; level: LevelName | null }
+// What the board reports to the hooks module: a win.
+export type Message = { won: Win }
 
 const MAX_SECONDS = 5999
 // Seven and eight in the theme's own text and inactive shades, so they show
@@ -110,7 +94,7 @@ const FACE_COLOR = 'claude'
 const FACE_INK = 'black'
 export const FACE_WIDTH = 9
 
-// A small seeded generator (mulberry32): the same seed deals the same board.
+// A small seeded generator (mulberry32): the same number lays the same board.
 export function randomOf(seed: number): () => number {
   let a = seed >>> 0
   return () => {
@@ -122,33 +106,22 @@ export function randomOf(seed: number): () => number {
   }
 }
 
-export function isLevelName(value: unknown): value is LevelName {
-  return typeof value === 'string' && Object.hasOwn(LEVELS, value)
-}
-
-export function levelOf(name: unknown): LevelName {
-  return isLevelName(name) ? name : 'beginner'
-}
-
 // A board with no mines yet: they are laid at the first reveal, around it.
-export function newGame(levelName: unknown, seed: number, id = 0): Game {
-  const level = levelOf(levelName)
-  const { cols, rows, mines } = LEVELS[level]
+export function newGame(seed: number, id = 0): Game {
   return {
     id,
-    level,
-    cols,
-    rows,
-    mines,
+    cols: COLS,
+    rows: ROWS,
+    mines: MINES,
     seed: seed >>> 0,
     adj: null,
-    marks: new Array<Mark>(cols * rows).fill(HIDDEN),
+    marks: new Array<Mark>(COLS * ROWS).fill(HIDDEN),
     status: 'ready',
     seconds: 0,
     opened: 0,
     flags: 0,
     boom: -1,
-    cursor: { x: cols >> 1, y: rows >> 1 },
+    cursor: { x: COLS >> 1, y: ROWS >> 1 },
     acted: 0,
     isPressing: false,
     isBlinking: false,
@@ -159,9 +132,9 @@ export function newGame(levelName: unknown, seed: number, id = 0): Game {
   }
 }
 
-// The same level again on the next seed.
+// A new board, laid from the next number.
 export function again(game: Game): Game {
-  return { ...newGame(game.level, game.seed + 1, game.id), acted: game.acted }
+  return { ...newGame(game.seed + 1, game.id), acted: game.acted }
 }
 
 export function neighbours(cols: number, rows: number, i: number): number[] {
@@ -337,7 +310,7 @@ export function cellAt(game: Game, x: number, y: number, cellWidth: number, cell
   return cy * game.cols + cx
 }
 
-// What a cell shows, decided once for both the classic board and the tiles.
+// What a cell shows, decided once for every way the board is drawn.
 // A lost board shows every mine: the one stepped on in red, the ones left
 // unflagged, and each flag that found one as a red flag on an open cell. A
 // flag that was wrong stays, faint, on an open cell, so it never reads as a
@@ -366,8 +339,7 @@ function numberInk(count: number): Style {
   return color === undefined ? { bold: true } : { color, bold: true }
 }
 
-function lookOf(game: Game, i: number): Style & { glyph: string } {
-  const shown = shownAt(game, i)
+function lookOf(shown: Shown): Style & { glyph: string } {
   switch (shown.kind) {
     case 'boom':
       return { glyph: '*', color: 'white', backgroundColor: 'red', bold: true }
@@ -406,27 +378,28 @@ function pushRun(runs: Run[], text: string, style: Style): void {
   else runs.push({ text, style })
 }
 
-// One board row as runs of text that share a style.
-export function rowRuns(game: Game, y: number, cellWidth: number): Run[] {
+// One board row a column a cell, as runs of text that share a style.
+export function rowRuns(game: Game, y: number): Run[] {
   const runs: Run[] = []
   for (let x = 0; x < game.cols; x++) {
-    const { glyph, ...style } = lookOf(game, y * game.cols + x)
-    const isCursor = isCursorAt(game, x, y)
-    pushRun(runs, glyph, isCursor ? CURSOR_STYLE : style)
-    if (cellWidth === 2) pushRun(runs, ' ', isCursor ? {} : style)
+    const { glyph, ...style } = lookOf(shownAt(game, y * game.cols + x))
+    pushRun(runs, glyph, isCursorAt(game, x, y) ? CURSOR_STYLE : style)
   }
   return runs
 }
 
 // How the board fits the room the pane gives it: each cell `width` columns
 // by `height` rows, and the face and the status `side` by side with the board
-// or under it. Two columns by one row is the classic board; from two rows a
-// cell is a tile, square on screen, so a small board grows into a big pane.
+// or under it. One column by one row is the classic board; from two columns
+// a hidden tile is a short box, and from two rows a cell is a tile, square on
+// screen, so the board grows into a big pane.
 export type Fit = { width: number; height: number; side: boolean }
 
 const SCALES = [3, 2] as const
 const SIDE_COLUMNS = 26
-const SIDE_ROWS = 10
+// Beside the board, a column of the face's four rows, a blank row, the three
+// status parts, the credit, and the outcome in up to two lines.
+const SIDE_ROWS = 4 + 1 + 3 + 1 + 2
 // The columns an inline pane's frame takes from the terminal's width.
 const INLINE_FRAME = 4
 const UNDER_ROWS = 5
@@ -437,8 +410,10 @@ const TILE = 'inactive'
 const OPEN_TILE = 'userMessageBackground'
 
 // The rows a fit takes in the board's own region: the board and, under it,
-// a blank row and the face's four; or, beside it, the face's column.
-function rowsFor(fit: Fit, rows: number): number {
+// a blank row and the face's four; or, beside it, the face's column. The
+// board draws every one of them: a pane above the prompt shrinks to what is
+// drawn, and a shorter drawing would leave too little room for this fit.
+export function rowsFor(fit: Fit, rows: number): number {
   return fit.side ? Math.max(rows * fit.height, SIDE_ROWS) : rows * fit.height + UNDER_ROWS
 }
 
@@ -452,6 +427,8 @@ const FITS: readonly Fit[] = [
     { width: 2 * k, height: k, side: false },
     { width: 2 * k, height: k, side: true },
   ]),
+  { width: 3, height: 1, side: false },
+  { width: 3, height: 1, side: true },
   { width: 2, height: 1, side: false },
   { width: 2, height: 1, side: true },
   { width: 1, height: 1, side: false },
@@ -459,7 +436,8 @@ const FITS: readonly Fit[] = [
 ]
 
 // The biggest fit the room holds; with the room unknown, or too small for
-// any, the classic board with the face under it.
+// any, a row a cell, two columns wide where the room has them, the face under
+// the board.
 export function fitFor(cols: number, rows: number, room: { columns: number; rows: number }): Fit {
   const fit = FITS.find((f) => columnsFor(f, cols) <= room.columns && rowsFor(f, rows) <= room.rows)
   return fit ?? { width: cellWidthFor(cols, room.columns), height: 1, side: false }
@@ -500,13 +478,42 @@ function tileOf(game: Game, x: number, y: number): Tile {
   }
 }
 
+// At a row a cell, a hidden tile is a box drawn short of its row, so a gap
+// shows between rows as one does between columns: two columns of three
+// quarter blocks and a gap, or a square of two quarter blocks.
+const SHORT_TILES: Readonly<Record<number, string>> = { 2: '▗▖', 3: '▆▆ ' }
+
+// A glyph fills its row top to bottom, so a tile that shows one cannot be
+// a short box. A number, a flag or a mine stands on the bare board, as on
+// the classic one, and an open empty cell is bare. The cursor lights an open
+// cell as wide as a box, its number or its dot on the face's colour, so it
+// never looks like the box it lights on a hidden cell; the mine that went off
+// keeps its colour the same way.
+function shortRow(game: Game, y: number, width: number): Run[] {
+  const runs: Run[] = []
+  const tile = SHORT_TILES[width] ?? ' '.repeat(width)
+  const across = Math.max(1, width - 1)
+  for (let x = 0; x < game.cols; x++) {
+    const shown = shownAt(game, y * game.cols + x)
+    const isCursor = isCursorAt(game, x, y)
+    if (shown.kind === 'hidden') pushRun(runs, tile, { color: isCursor ? FACE_COLOR : TILE })
+    else if (shown.kind === 'empty' && !isCursor) pushRun(runs, ' '.repeat(width), {})
+    else {
+      const { glyph, ...style } = lookOf(shown)
+      pushRun(runs, glyph + ' '.repeat(across - 1), isCursor ? CURSOR_STYLE : style)
+      pushRun(runs, ' '.repeat(width - across), {})
+    }
+  }
+  return runs
+}
+
 // The board's screen rows as runs of text that share a style. A tile is
 // `width - 1` columns of colour with a gap after it, its last row a half
 // block so the gap between rows is half a row, as the gap between columns is.
 export function boardRows(game: Game, fit: Fit): Run[][] {
   const out: Run[][] = []
   if (fit.height === 1) {
-    for (let y = 0; y < game.rows; y++) out.push(rowRuns(game, y, fit.width))
+    for (let y = 0; y < game.rows; y++) out.push(fit.width === 1 ? rowRuns(game, y) : shortRow(game, y, fit.width))
     return out
   }
   const across = fit.width - 1
@@ -735,13 +742,15 @@ export function clock(seconds: number): string {
 
 export function statusParts(game: Game, best: Best): string[] {
   const parts = [`Mines ${game.mines - game.flags}`, `Time ${clock(game.seconds)}`]
-  const record = best[game.level]
-  if (record !== undefined) parts.push(`Best ${clock(record)}`)
+  if (best !== null) parts.push(`Best ${clock(best)}`)
   return parts
 }
 
+// Between the parts of the status line, and before the credit after them.
+export const SEPARATOR = ' · '
+
 export function statusLine(game: Game, best: Best): string {
-  return statusParts(game, best).join('  ·  ')
+  return statusParts(game, best).join(SEPARATOR)
 }
 
 export function outcomeLine(game: Game, best: Best): string {
@@ -753,8 +762,7 @@ export function outcomeLine(game: Game, best: Best): string {
     case 'playing':
       return `${game.cols * game.rows - game.mines - game.opened} safe cells left.`
     case 'won': {
-      const record = best[game.level]
-      const isBest = record === undefined || game.seconds <= record
+      const isBest = best === null || game.seconds <= best
       return `Cleared in ${clock(game.seconds)}.${isBest ? ' Best time!' : ''}`
     }
   }
@@ -768,72 +776,47 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-// Best times as the store may hand them back: only known levels, whole seconds.
+// The best time as the store may hand it back: whole seconds, or null.
 export function bestOf(value: unknown): Best {
-  const best: Record<string, number> = {}
-  if (!isRecord(value)) return best
-  for (const level of LEVEL_NAMES) {
-    const seconds = value[level]
-    if (isSeconds(seconds)) best[level] = seconds
-  }
-  return best
+  return isSeconds(value) ? value : null
 }
 
-// The same object when the time is no better, so a caller can tell.
-export function betterBest(best: Best, level: LevelName, seconds: number): Best {
-  const record = best[level]
-  return record !== undefined && record <= seconds ? best : { ...best, [level]: seconds }
+// The same time back when the new one is no better, so a caller can tell.
+export function betterBest(best: Best, seconds: number): Best {
+  return best !== null && best <= seconds ? best : seconds
 }
 
-// The better time per level of two records, so a write never loses one.
+// The better of two records, so a write never loses one.
 export function mergeBest(a: Best, b: Best): Best {
-  let merged = a
-  for (const level of LEVEL_NAMES) {
-    const seconds = b[level]
-    if (seconds !== undefined) merged = betterBest(merged, level, seconds)
-  }
-  return merged
+  return b === null ? a : betterBest(a, b)
 }
 
 function winOf(value: unknown): Win | null {
-  if (!isRecord(value) || !isLevelName(value.level) || !isSeconds(value.seconds)) return null
-  return { level: value.level, seconds: value.seconds }
+  if (!isRecord(value) || !isSeconds(value.seconds)) return null
+  return { seconds: value.seconds }
 }
 
 // What the board may post to the hooks module. It comes from code, so it is
-// checked here: a post with neither a valid win nor a valid level is null.
+// checked here: a post without a valid win is null.
 export function messageOf(data: unknown): Message | null {
   if (!isRecord(data)) return null
-  const message = { won: winOf(data.won), level: isLevelName(data.level) ? data.level : null }
-  return message.won === null && message.level === null ? null : message
+  const won = winOf(data.won)
+  return won === null ? null : { won }
 }
 
-export type Asked = { level: LevelName | null; seed: number | null } | { error: string }
+// The pane's own rows: a blank row above the board, the control buttons and
+// a line of hints below it.
+export const CHROME_ROWS = 3
 
-// `/mines [level] [seed]`, either or both, a level by any prefix of its name.
-export function parseArgs(args: string | undefined): Asked {
-  const asked: { level: LevelName | null; seed: number | null } = { level: null, seed: null }
-  for (const word of (args ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)) {
-    const level = LEVEL_NAMES.find((name) => name.startsWith(word))
-    if (level) asked.level = level
-    else if (/^\d{1,9}$/.test(word)) asked.seed = Number(word)
-    else return { error: `Minefield does not know "${word}". Use /mines [beginner|intermediate|expert] [seed].` }
-  }
-  return asked
-}
-
-// The pane's own rows: the level buttons and a blank row above the board,
-// the control buttons and a line of hints below it.
-export const CHROME_ROWS = 4
+// The columns a docked pane asks for: room to grow the board into big tiles.
+const DOCKED_COLUMNS = 60
 
 // A docked pane opens to the columns it asks for, floor to ceiling, and a
 // pane above the prompt to the rows it asks for, across the terminal; each
-// ignores the other. Docked, it asks for room to grow a small board into
-// tiles. Above the prompt it asks for the rows of the most compact fit the
-// terminal's width holds, the face beside the board where it can be.
-export function paneSize(levelName: unknown, terminalColumns: number): { rows: number; columns: number } {
-  const { cols, rows } = LEVELS[levelOf(levelName)]
-  const columns = Math.max(60, cols * (cols <= 16 ? 4 : 2) + 4)
-  const fit = compactFit(cols, terminalColumns - INLINE_FRAME)
-  return { rows: rowsFor(fit, rows) + CHROME_ROWS, columns }
+// ignores the other. Above the prompt it asks for the rows of the most
+// compact fit the terminal's width holds, the face beside the board where it
+// can be.
+export function paneSize(terminalColumns: number): { rows: number; columns: number } {
+  const fit = compactFit(COLS, terminalColumns - INLINE_FRAME)
+  return { rows: rowsFor(fit, ROWS) + CHROME_ROWS, columns: DOCKED_COLUMNS }
 }

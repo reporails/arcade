@@ -6,23 +6,25 @@ Minesweeper in a Claude Code pane. A mod, shipped as a plugin: `/mines` opens a 
 
 ```text
 ❯ ./register.ts hooks: session.start, command.run{command=mines}, ui.render{component=Pane}, ui.message
-❯ ./register.ts calls: $.clock.after (via focusSoon), $.command.register, $.session.surfaces, $.store.get, $.store.set (via recordWin), $.ui.invalidate, $.ui.open (via openPane), $.ui.panes (via refocus), $.ui.resolve
+❯ ./register.ts calls: $.clock.after (via focusSoon), $.clock.now (via deal), $.command.register, $.session.surfaces, $.store.get, $.store.set (via recordWin), $.ui.invalidate, $.ui.open (via openPane), $.ui.panes (via refocus), $.ui.resolve
 ❯ ./register.ts surface modules: hooks/board.ts
 ```
 
 No prompt, tool or attachment hook, and no network call.
 
 ```text
-· · · · · 1 ■ ■ ■
-· · · · · 2 ⚑ ■ ■
-· · · · · 2 ■ ■ ■
-· · · · · 1 1 ■ ■
-1 1 1 · · · 1 ■ ⚑
-■ ■ 2 2 1 1 1 ■ ■
-■ ■ ■ ■ ■ ■ ■ ■ ■
+               1  ▆▆ ▆▆ ▆▆
+               2  ⚑  ▆▆ ▆▆
+               2  ▆▆ ▆▆ ▆▆
+               1  1  ▆▆ ▆▆
+1  1  1           1  ▆▆ ⚑
+▆▆ ▆▆ 2  2  1  1  1  ▆▆ ▆▆
+▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆
+▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆
+▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆
 
  ▄▄▄▄▄▄▄
-  ●   ●    Mines 8  ·  Time 0:17  ·  Best 0:42
+  ●   ●    Mines 8 · Time 0:17 · Best 0:42 · By Reporails
     ω      34 safe cells left.
  ▀▀▀▀▀▀▀
 ```
@@ -52,8 +54,8 @@ Mods need Claude Code 2.1.287 or later, where they are on by default. For the si
 | Input | What it does |
 |---|---|
 | `/mines` | Opens the pane. If a game is in play, it stays as it is. |
-| `/mines expert` | Deals a new game on that level: `beginner` (9×9, 10 mines), `intermediate` (16×16, 40) or `expert` (30×16, 99). Any prefix of the name works. |
-| `/mines beginner 42` | Deals from a seed, so the same first move gives the same board. |
+
+One board, 9×9 with 10 mines: a game for the few minutes Claude works.
 
 `/mines` is an immediate command, so it works while Claude is mid-turn.
 
@@ -66,18 +68,19 @@ Mods need Claude Code 2.1.287 or later, where they are on by default. For the si
 | `r` | Reveals the cell under the cursor. |
 | `f` | Flags the cell under the cursor. |
 | `w` `a` `s` `d` | Move the cursor. |
-| `n` | New game on the same level. |
-| `b` `i` `e` | New game on Beginner, Intermediate or Expert. |
+| `n` | New game. |
 | Arrow keys, `h` `j` `k` `l`, space, return | Move and reveal, once a click has given the board the keyboard. |
 | `Esc` | Hands the keyboard back to the prompt; the game stays. `ctrl+x tab` gives the pane the keys again. Close the pane with its `✕` or `ctrl+x x`. |
 
 The letter keys work as soon as `/mines` has opened the pane; nothing needs a click first. The mouse needs the fullscreen layout (`/tui fullscreen` turns it on); the line under the buttons says which you have.
 
-The board grows into the room the pane has. Docked beside the transcript, a Beginner board is drawn as big square tiles, three rows a cell where the pane is tall enough and two where it is not; the larger levels keep two columns a cell. Above the prompt, where rows are few, the face and the status move beside the board instead of under it, so nothing is cut off.
+The board grows into the room the pane has. Docked beside the transcript, it is drawn as big square tiles, three rows a cell where the pane is tall enough, two where it is not, and one in a short terminal. Above the prompt, where rows are few, a cell is one row, its hidden tile a smaller box, and the face and the status move beside the board instead of under it, so nothing is cut off.
 
-The first reveal is always safe and opens an area: the mines are laid after it, away from that cell and the eight around it. The clock runs from the first reveal to the last. The best time per level is kept between sessions in the plugin's own store.
+The first reveal is always safe and opens an area: the mines are laid after it, away from that cell and the eight around it. The clock runs from the first reveal to the last. The best time is kept between sessions in the plugin's own store.
 
 Closing the pane ends the game in play.
+
+The status line ends with a **By Reporails** link to the [Reporails CLI](https://github.com/reporails/cli) on GitHub. Your terminal opens it; the mod itself makes no network call.
 
 ## The face
 
@@ -101,14 +104,14 @@ minefield/
 ├── .claude-plugin/plugin.json
 ├── hooks/
 │   ├── hooks.json      points at register.ts
-│   ├── register.ts     the hooks: the command, the pane, the buttons, best times
+│   ├── register.ts     the hooks: the command, the pane, the buttons, the best time
 │   ├── board.ts        the surface module: draws the board and the face, takes the pointer and keys
 │   └── lib.ts          pure functions: the game rules, the cell styles, parsing
 ├── tests/minefield.test.ts  runs with `claude plugin test`
 └── README.md
 ```
 
-The game lives in the board's local state. The hooks module says which game to deal (level, seed), hands down the best times, and draws the buttons; the board posts back a win, or a level asked for by key.
+The game lives in the board's local state. The hooks module deals the game, its mines laid from the time it is dealt, hands down the best time, and draws the buttons; the board posts back a win.
 
 Four things a live session showed that the test kit did not:
 
@@ -122,8 +125,8 @@ The face runs on the board's own timer, five beats a second, as pure functions i
 ## Tested on
 
 - Claude Code 2.1.288, where mods are on by default: `claude plugin validate --strict` passes and `claude plugin test` passes 31 of 31, from a logged-out config, the way CI runs them.
-- Claude Code 2.1.285: strict `tsc` passes on the code and the tests against that build's typings, and the same 31 tests pass. CI runs both builds. The tests cover the rules (safe first reveal, numbers, flags, opening around a number, winning, losing, the clock), the face's gaze, reading, blinks and reactions, the board's fit to the pane and the pane's size, and the mod driven through its pane on the terminal and desktop surfaces: pointer, keys, buttons, level changes, a win stored as the best time.
-- Played in the terminal in both layouts, through a win and a loss; the big tiles, the face's reading and its blinks watched live in a docked pane.
+- Claude Code 2.1.285: strict `tsc` passes on the code and the tests against that build's typings, and the same 31 tests pass. CI runs both builds. The tests cover the rules (safe first reveal, numbers, flags, opening around a number, winning, losing, the clock), the face's gaze, reading, blinks and reactions, the board's fit to the pane and the pane's size, and the mod driven through its pane on the terminal and desktop surfaces: pointer, keys, buttons, `/mines` bringing back the game in play, a win stored as the best time.
+- Played in the terminal in both layouts, through a loss; the big tiles, the face's reading and its blinks watched live in a docked pane. A win and its stored best time are covered by the tests, since a live win writes to the real store.
 - Not yet tried: the desktop app outside the test kit.
 
 ## If it does not start
@@ -132,4 +135,4 @@ The face runs on the board's own timer, five beats a second, as pure functions i
 - `/plugin` shows a dim `mod active` line naming the mods that loaded. If minefield is not on it, run `claude plugin test` in an empty folder: `no hooks module to load` means mods load for you; `hooks modules are turned off` means Anthropic has them off for your account, and no local setting changes that. An organization can also limit which mods load (`allowManagedModsOnly`).
 - In VS Code's chat panel and `claude -p` there is nothing to draw a board on; `/mines` says so.
 
-Made by [reporails](https://reporails.com/?utm_source=arcade&utm_medium=readme), diagnostics for the instructions that steer Claude Code. MIT.
+Made by [Reporails](https://reporails.com/?utm_source=arcade&utm_medium=readme), diagnostics for the instructions that steer Claude Code. MIT.

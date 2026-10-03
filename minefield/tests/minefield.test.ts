@@ -28,7 +28,6 @@ import {
   newGame,
   nextMood,
   paneSize,
-  parseArgs,
   react,
   reactionTo,
   reveal,
@@ -39,7 +38,7 @@ import {
 import type { Game, Mood } from '../hooks/lib'
 
 const SEED = 42
-// The middle of the beginner board, where a new game's cursor starts.
+// The middle of the board, where a new game's cursor starts.
 const FIRST = 4 * 9 + 4
 const NO_BOARD = 'Minefield draws its board in the terminal and the desktop app only. In VS Code, run claude in the integrated terminal.'
 
@@ -53,9 +52,9 @@ const PANE = {
   props: { title: 'Minefield', isFocused: true, bodyColumns: 100, placement: 'inline', scroll: { offset: 0, bodyRows: 18 }, view: {} },
 } as const
 
-// `/mines <args>` typed at the prompt.
-function mines(args: string): CommandRunInput {
-  return { command: 'mines', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } }
+// `/mines` typed at the prompt.
+function mines(): CommandRunInput {
+  return { command: 'mines', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } }
 }
 
 type Opened = { rows: number | undefined; columns: number | undefined; closeOnEscape: true | undefined }
@@ -95,12 +94,13 @@ function world(
   on('ui.panes', () => ({
     value: pane.isOpen ? [{ id: 'minefield', title: 'Minefield', isShown: true, isFocused: pane.isFocused, isPlaced: true }] : [],
   }))
-  return mock.clock(on)
+  // The clock starts at SEED, so the first deal lays the board `started()` plays.
+  return mock.clock(on, { now: SEED })
 }
 
-// A beginner game on a known seed, its first cell revealed.
+// A game on a known seed, its first cell revealed.
 function started(): Game {
-  return reveal(newGame('beginner', SEED), FIRST)
+  return reveal(newGame(SEED), FIRST)
 }
 
 // The counts of a dealt game: the mines around each cell, or MINE.
@@ -123,12 +123,12 @@ function firstOf(cells: readonly number[], isWanted: (i: number) => boolean = ()
 const isMine = (count: number) => count === MINE
 const isSafe = (count: number) => count !== MINE
 
-// Press on the cell at index i of a beginner board drawn two columns a cell.
+// Press on the cell at index i of a board drawn three columns a cell.
 function click(board: Pick<Mounted<'terminal', 'Pane'>, 'pointer'>, i: number, button: 'left' | 'middle' | 'right' = 'left') {
-  return board.pointer({ type: 'down', x: (i % 9) * 2, y: Math.floor(i / 9), button, in: 'board' })
+  return board.pointer({ type: 'down', x: (i % 9) * 3 + 1, y: Math.floor(i / 9), button, in: 'board' })
 }
 
-test('the first reveal is safe, opens an area, and the seed decides the board', async () => {
+test('the first reveal is safe, opens an area, and the same deal lays the same board', async () => {
   const game = started()
   const adj = adjOf(game)
   expect(game.status).toBe('playing')
@@ -143,10 +143,10 @@ test('the first reveal is safe, opens an area, and the seed decides the board', 
 })
 
 test('every number counts the mines around its cell', async () => {
-  const adj = layout(30, 16, 99, 7, 0)
-  expect(adj.filter(isMine).length).toBe(99)
+  const adj = layout(9, 9, 10, 7, 0)
+  expect(adj.filter(isMine).length).toBe(10)
   adj.forEach((count, i) => {
-    if (count !== MINE) expect(count).toBe(neighbours(30, 16, i).filter((n) => adj[n] === MINE).length)
+    if (count !== MINE) expect(count).toBe(neighbours(9, 9, i).filter((n) => adj[n] === MINE).length)
   })
 })
 
@@ -211,23 +211,21 @@ test('a number with its flags set opens the cells around it', async () => {
 })
 
 test('the cursor lights its own glyph and nothing beside it', async () => {
-  const ready = newGame('beginner', SEED)
-  for (const cellWidth of [1, 2]) {
-    const runs = rowRuns(ready, 4, cellWidth)
-    const lit = runs.filter((run) => run.style.backgroundColor !== undefined)
-    expect(lit).toEqual([{ text: '■', style: { color: 'black', backgroundColor: 'claude', bold: true } }])
-    // The row keeps its width: one glyph, and a space when cells are two wide
-    expect(runs.map((run) => run.text).join('').length).toBe(9 * cellWidth)
-  }
+  const ready = newGame(SEED)
+  const runs = rowRuns(ready, 4)
+  const lit = runs.filter((run) => run.style.backgroundColor !== undefined)
+  expect(lit).toEqual([{ text: '■', style: { color: 'black', backgroundColor: 'claude', bold: true } }])
+  // The row keeps its width: a glyph a cell
+  expect(runs.map((run) => run.text).join('').length).toBe(9)
   // Rows without the cursor light nothing
-  expect(rowRuns(ready, 0, 2).every((run) => run.style.backgroundColor === undefined)).toBe(true)
+  expect(rowRuns(ready, 0).every((run) => run.style.backgroundColor === undefined)).toBe(true)
 
   // Once the game is over there is no cursor, so the mine that ended it shows as that mine
   const game = started()
   const mine = firstOf(cellsWhere(game, isMine))
   const lost = reveal(moveTo(game, mine), mine)
-  const row = rowRuns(lost, Math.floor(mine / 9), 2)
-  expect(row.filter((run) => run.style.backgroundColor !== undefined)).toEqual([{ text: '* ', style: { color: 'white', backgroundColor: 'red', bold: true } }])
+  const row = rowRuns(lost, Math.floor(mine / 9))
+  expect(row.filter((run) => run.style.backgroundColor !== undefined)).toEqual([{ text: '*', style: { color: 'white', backgroundColor: 'red', bold: true } }])
 })
 
 test('a lost board shows every mine, a right flag in red and a wrong one faint, both on open cells', async () => {
@@ -255,13 +253,30 @@ test('a lost board shows every mine, a right flag in red and a wrong one faint, 
   expect(tileAt(boom)?.style.backgroundColor).toBe('red')
   for (const i of mines.filter((m) => m !== right && m !== boom)) expect(tileAt(i)?.glyph).toBe('*')
 
+  // A row a cell: the same glyphs on the bare board, only the mine that went off lit
+  for (const width of [3, 2]) {
+    const short = boardRows(lost, { width, height: 1, side: false })
+    const cellOf = (i: number) => {
+      let x = 0
+      for (const run of short[Math.floor(i / 9)] ?? []) {
+        if (width * (i % 9) < x + run.text.length) return { glyph: run.text[width * (i % 9) - x], style: run.style }
+        x += run.text.length
+      }
+      return undefined
+    }
+    expect(cellOf(right)).toEqual({ glyph: '⚑', style: { color: 'red', bold: true } })
+    expect(cellOf(safe)).toEqual({ glyph: '⚑', style: { dimColor: true } })
+    expect(cellOf(boom)).toEqual({ glyph: '*', style: { color: 'white', backgroundColor: 'red', bold: true } })
+    for (const i of mines.filter((m) => m !== right && m !== boom)) expect(cellOf(i)).toEqual({ glyph: '*', style: { color: 'red' } })
+  }
+
   // The classic board draws the wrong flag faint
-  const classic = rowRuns(lost, Math.floor(safe / 9), 2)
-  expect(classic.some((run) => run.text.startsWith('⚑') && run.style.dimColor === true)).toBe(true)
+  const classic = rowRuns(lost, Math.floor(safe / 9))
+  expect(classic.some((run) => run.text.includes('⚑') && run.style.dimColor === true)).toBe(true)
 })
 
 test('the clock runs only while a game is being played', async () => {
-  const ready = newGame('beginner', SEED)
+  const ready = newGame(SEED)
   expect(tick(ready)).toBe(ready)
   expect(tick(tick(started())).seconds).toBe(2)
   expect(clock(0)).toBe('0:00')
@@ -269,9 +284,9 @@ test('the clock runs only while a game is being played', async () => {
 })
 
 test('a pointer position maps to its cell at either cell width', async () => {
-  const game = newGame('beginner', SEED)
+  const game = newGame(SEED)
   expect(cellWidthFor(9, 100)).toBe(2)
-  expect(cellWidthFor(30, 40)).toBe(1)
+  expect(cellWidthFor(9, 12)).toBe(1)
   expect(cellAt(game, 0, 0, 2)).toBe(0)
   expect(cellAt(game, 5, 2, 2)).toBe(20)
   expect(cellAt(game, 5, 2, 1)).toBe(23)
@@ -280,34 +295,27 @@ test('a pointer position maps to its cell at either cell width', async () => {
   expect(cellAt(game, -1, 0, 2)).toBe(-1)
 })
 
-test('arguments, best times and posts are checked', async () => {
-  expect(parseArgs('')).toEqual({ level: null, seed: null })
-  expect(parseArgs('expert 7')).toEqual({ level: 'expert', seed: 7 })
-  expect(parseArgs('int')).toEqual({ level: 'intermediate', seed: null })
-  const unknown = parseArgs('hard')
-  expect('error' in unknown ? unknown.error : '').toContain('Minefield does not know "hard"')
+test('the best time and posts are checked', async () => {
+  expect(betterBest(30, 31)).toBe(30)
+  expect(betterBest(30, 12)).toBe(12)
+  expect(betterBest(null, 40)).toBe(40)
+  expect(bestOf(30)).toBe(30)
+  for (const stored of [null, -1, 1.5, 'fast', { seconds: 30 }]) expect(bestOf(stored)).toBe(null)
 
-  const best = { beginner: 30 }
-  expect(betterBest(best, 'beginner', 31)).toBe(best)
-  expect(betterBest(best, 'beginner', 12)).toEqual({ beginner: 12 })
-  expect(betterBest(best, 'expert', 400)).toEqual({ beginner: 30, expert: 400 })
-  expect(bestOf({ beginner: 30, expert: 'fast', bogus: 1 })).toEqual({ beginner: 30 })
-  expect(bestOf(null)).toEqual({})
-
-  const win = { level: 'beginner', seconds: 12 }
-  expect(messageOf({ won: win, level: null })).toEqual({ won: win, level: null })
-  expect(messageOf({ won: null, level: 'expert' })).toEqual({ won: null, level: 'expert' })
-  // A level asked for in the same frame as a win carries the win along
-  expect(messageOf({ won: win, level: 'expert' })).toEqual({ won: win, level: 'expert' })
-  expect(messageOf({ won: { level: 'beginner', seconds: -1 }, level: null })).toBe(null)
-  expect(messageOf({ won: { level: 'constructor', seconds: 1 }, level: 'constructor' })).toBe(null)
+  const win = { seconds: 12 }
+  expect(messageOf({ won: win })).toEqual({ won: win })
+  expect(messageOf({ won: { seconds: -1 } })).toBe(null)
+  expect(messageOf({ won: null })).toBe(null)
   expect(messageOf('won')).toBe(null)
 
-  expect(mergeBest({ beginner: 5, expert: 500 }, { beginner: 12, intermediate: 90 })).toEqual({ beginner: 5, expert: 500, intermediate: 90 })
+  expect(mergeBest(5, 12)).toBe(5)
+  expect(mergeBest(12, 5)).toBe(5)
+  expect(mergeBest(null, 12)).toBe(12)
+  expect(mergeBest(12, null)).toBe(12)
 })
 
 test('the face shows how the game is going', async () => {
-  const ready = newGame('beginner', SEED)
+  const ready = newGame(SEED)
   // A new board looks at the player: dot eyes, a small mouth
   expect(faceOf(ready)).toEqual({ eyes: '  ●   ●  ', mouth: '    ω    ' })
   // The eyes sit where the gaze puts them, and the mouth leans after them
@@ -392,7 +400,7 @@ test('a move turns the face to the cursor, a move it likes gets a reaction, and 
   expect(reactionTo(game, { ...game, status: 'won' })).toBe('delight')
   expect(reactionTo(game, again(game))).toBe(null)
 
-  const ready = newGame('beginner', SEED)
+  const ready = newGame(SEED)
   // Reading follows its path, a position a beat
   expect(looks(ready, mood, 10)).toMatchObject({ gaze: 'reading', eyesAt: 2 })
   expect(looks(ready, mood, 11)).toMatchObject({ eyesAt: 3 })
@@ -410,7 +418,7 @@ test('a move turns the face to the cursor, a move it likes gets a reaction, and 
 test('the face gasps at a reveal, reads when left alone, blinks, and crosses its eyes on a mine', async ($, on) => {
   world(on)
   await $.session.start(SESSION)
-  await $.command.run(mines('beginner ' + SEED))
+  await $.command.run(mines())
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const eyes = (text: string | RegExp) => ui.find({ type: 'Text', text, in: 'board' })
   expect(await eyes('  ●   ●  ')).toBeDefined()
@@ -441,13 +449,14 @@ test('the board grows into the room the pane has, with the face under it or besi
   // A docked pane: square tiles three rows tall, or two, where they fit
   expect(fitFor(9, 9, { columns: 60, rows: 36 })).toEqual({ width: 6, height: 3, side: false })
   expect(fitFor(9, 9, { columns: 60, rows: 25 })).toEqual({ width: 4, height: 2, side: false })
-  expect(fitFor(16, 16, { columns: 60, rows: 40 })).toEqual({ width: 2, height: 1, side: false })
-  // Short on rows: the face and the status go beside the board
-  expect(fitFor(9, 9, { columns: 100, rows: 12 })).toEqual({ width: 2, height: 1, side: true })
-  expect(fitFor(30, 16, { columns: 100, rows: 18 })).toEqual({ width: 2, height: 1, side: true })
-  // Narrow: a column a cell, beside the face where that fits; unknown room: the classic board
-  expect(fitFor(30, 16, { columns: 40, rows: 30 })).toEqual({ width: 1, height: 1, side: false })
-  expect(fitFor(30, 16, { columns: 76, rows: 16 })).toEqual({ width: 1, height: 1, side: true })
+  // Short on rows: a row a cell, the face and the status beside the board where they do not fit under it
+  expect(fitFor(9, 9, { columns: 100, rows: 14 })).toEqual({ width: 3, height: 1, side: false })
+  expect(fitFor(9, 9, { columns: 100, rows: 12 })).toEqual({ width: 3, height: 1, side: true })
+  expect(fitFor(9, 9, { columns: 50, rows: 12 })).toEqual({ width: 2, height: 1, side: true })
+  // Narrow: fewer columns a cell, down to one; unknown room: a row a cell, two columns wide
+  expect(fitFor(9, 9, { columns: 20, rows: 30 })).toEqual({ width: 2, height: 1, side: false })
+  expect(fitFor(9, 9, { columns: 12, rows: 30 })).toEqual({ width: 1, height: 1, side: false })
+  expect(fitFor(9, 9, { columns: 40, rows: 12 })).toEqual({ width: 1, height: 1, side: true })
   expect(fitFor(9, 9, { columns: 100, rows: 0 })).toEqual({ width: 2, height: 1, side: false })
 
   // Every cell is a tile: three columns of colour over a half-block row, a gap column after it
@@ -468,30 +477,60 @@ test('the board grows into the room the pane has, with the face under it or besi
   const fills = new Set(rows[0]?.map((run) => run.style.backgroundColor).filter((fill) => fill !== undefined))
   expect(fills.has('inactive') && fills.has('userMessageBackground')).toBe(true)
   expect(rows[8]?.some((run) => run.style.backgroundColor === 'claude')).toBe(true)
+  // A row a cell: a hidden tile is a box short of its row, with a gap after
+  // it; a number stands on the bare board, and an empty cell is bare
+  const number = firstOf(cellsWhere(game, (count, i) => count > 0 && game.marks[i] === OPEN))
+  for (const [width, tile] of [[3, '▆▆ '], [2, '▗▖']] as const) {
+    const short = boardRows(game, { width, height: 1, side: false })
+    const shortTexts = short.map((runs) => runs.map((run) => run.text).join(''))
+    expect(shortTexts.length).toBe(9)
+    for (let y = 0; y < 9; y++) {
+      for (let x = 0; x < 9; x++) {
+        const i = y * 9 + x
+        const count = adjOf(game)[i] ?? 0
+        const shown = game.marks[i] === HIDDEN ? tile : i === FIRST ? '·' : count > 0 ? String(count) : ''
+        expect(shortTexts[y]?.slice(width * x, width * x + width)).toBe(shown.padEnd(width))
+      }
+    }
+    // The boxes in the hidden tile's colour; the cursor, on an open empty cell, lights its dot as wide as a box
+    const boxes = short.flat().filter((run) => run.text.includes(tile.trim()))
+    expect(new Set(boxes.map((run) => run.style.color))).toEqual(new Set(['inactive']))
+    const cursor = { color: 'black', backgroundColor: 'claude', bold: true }
+    expect(short.flat().filter((run) => run.style.backgroundColor !== undefined)).toEqual([{ text: '·'.padEnd(width - 1), style: cursor }])
+    // On a hidden cell the cursor is the box itself, in the face's colour, so the two never look alike
+    const hidden = firstOf(cellsWhere(game, (_, i) => game.marks[i] === HIDDEN))
+    const onHidden = boardRows(moveTo(game, hidden), { width, height: 1, side: false })[Math.floor(hidden / 9)] ?? []
+    expect(onHidden.some((run) => run.text.startsWith(tile.trim()) && run.style.color === 'claude' && run.style.backgroundColor === undefined)).toBe(true)
+    // The cursor on a number lights it as wide as a box, and the gap after it stays bare
+    const lit = boardRows(moveTo(game, number), { width, height: 1, side: false })[Math.floor(number / 9)]?.filter((run) => run.style.backgroundColor !== undefined)
+    expect(lit).toEqual([{ text: String(adjOf(game)[number]).padEnd(width - 1), style: cursor }])
+  }
   // A pointer anywhere on a tile, its gap included, is that tile's cell
   expect(cellAt(game, 13, 3, 4, 2)).toBe(12)
   expect(cellAt(game, 15, 2, 4, 2)).toBe(12)
 })
 
 test('a pane above the prompt asks for the rows of the most compact fit, a docked one for the columns to grow', async () => {
-  // An 80-column terminal: Beginner with the face beside it; Expert one column a cell, face beside
-  expect(paneSize('beginner', 80)).toEqual({ rows: 14, columns: 60 })
-  expect(paneSize('intermediate', 80)).toEqual({ rows: 20, columns: 68 })
-  expect(paneSize('expert', 80)).toEqual({ rows: 20, columns: 64 })
+  // An 80-column terminal: three columns a cell, the face beside the board
+  expect(paneSize(80)).toEqual({ rows: 14, columns: 60 })
+  // Narrower: two columns a cell, the face still beside it
+  expect(paneSize(50)).toEqual({ rows: 14, columns: 60 })
   // Too narrow for the face beside it: the face goes under
-  expect(paneSize('expert', 50)).toEqual({ rows: 25, columns: 64 })
+  expect(paneSize(30)).toEqual({ rows: 17, columns: 60 })
 })
 
 test('a big pane plays on big tiles, and the pane says how to play on the screen it is on', async ($, on) => {
   world(on)
   await $.session.start(SESSION)
-  await $.command.run(mines('beginner ' + SEED))
+  await $.command.run(mines())
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 60, scroll: { offset: 0, bodyRows: 40 } } })
   // Six columns by three rows a cell: a click on the middle of a tile reveals it
   await ui.pointer({ type: 'down', x: 4 * 6 + 2, y: 4 * 3 + 1, button: 'left', in: 'board' })
   await ui.pointer({ type: 'up', x: 4 * 6 + 2, y: 4 * 3 + 1, button: 'left', in: 'board' })
   expect(await ui.find({ type: 'Text', text: `${71 - started().opened} safe cells left.`, in: 'board' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Click reveals, right-click flags/ })).toBeDefined()
+  // After the status, the maker's credit links to the reporails CLI
+  expect((await ui.find({ type: 'Link', in: 'board' }))?.props).toEqual({ href: 'https://github.com/reporails/cli', label: 'By Reporails' })
   await ui.unmount()
 
   const unfocused = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, isFocused: false } })
@@ -502,22 +541,26 @@ test('on the main screen the pane asks for few rows, says keys only, and puts th
   const opened: Opened[] = []
   world(on, { opened })
   await $.session.start(SESSION)
-  await $.command.run({ ...mines('beginner ' + SEED), presentation: { isFullscreen: false, columns: 100 } })
+  await $.command.run({ ...mines(), presentation: { isFullscreen: false, columns: 100 } })
   expect(opened.at(-1)).toEqual({ rows: 14, columns: 60, closeOnEscape: undefined })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, scroll: { offset: 0, bodyRows: 14 } } })
   expect(await ui.find({ type: 'Text', text: 'Keys only on this screen: /tui fullscreen adds the mouse.' })).toBeDefined()
   // Beside the board, the status is a line a part
   expect(await ui.find({ type: 'Text', text: 'Mines 10', in: 'board' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Time 0:00', in: 'board' })).toBeDefined()
+  // and the credit a line of its own under it
+  expect((await ui.find({ type: 'Link', in: 'board' }))?.props.label).toBe('By Reporails')
+  // The board fills every row its fit takes, so a pane sized to its drawing keeps the room for it
+  expect(await ui.drawn({ in: 'board' })).toMatchObject({ props: { minHeight: 11 } })
 })
 
 test('/mines opens the board, and the pointer reveals and flags', async ($, on) => {
   world(on)
   await $.session.start(SESSION)
-  expect(await $.command.run(mines('beginner ' + SEED))).toEqual({})
+  expect(await $.command.run(mines())).toEqual({})
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^Mines 10 .* Time 0:00$/, in: 'board' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Mines 10 · Time 0:00 · /, in: 'board' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Reveal a cell to start/, in: 'board' })).toBeDefined()
 
   await click(ui, FIRST)
@@ -534,7 +577,7 @@ test('/mines opens the board, and the pointer reveals and flags', async ($, on) 
 test('the keys move the cursor, reveal and flag, and n deals again', async ($, on) => {
   world(on)
   await $.session.start(SESSION)
-  await $.command.run(mines('beginner ' + SEED))
+  await $.command.run(mines())
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
 
   // The cursor starts in the middle: space reveals there, as the first click would
@@ -562,10 +605,10 @@ test('the keys move the cursor, reveal and flag, and n deals again', async ($, o
 })
 
 test('a win is posted, kept as the best time and stored', async ($, on) => {
-  const store: Record<string, unknown> = { best: { beginner: 30, expert: 500 } }
+  const store: Record<string, unknown> = { best: 30 }
   world(on, { store })
   await $.session.start(SESSION)
-  await $.command.run(mines('beginner ' + SEED))
+  await $.command.run(mines())
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Best 0:30/, in: 'board' })).toBeDefined()
 
@@ -579,31 +622,26 @@ test('a win is posted, kept as the best time and stored', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: '  ^   ^  ', in: 'board' })).toBeDefined()
   await ui.advance(600)
   expect(await ui.find({ type: 'Text', text: ' ▀██▀██▀ ', in: 'board' })).toBeDefined()
-  expect(store.best).toEqual({ beginner: 12, expert: 500 })
+  expect(store.best).toBe(12)
 
   // The clock stopped with the game
   await ui.advance(5000)
   expect(await ui.find({ type: 'Text', text: /Time 0:12/, in: 'board' })).toBeDefined()
 })
 
-test('a level button deals that level, and so does its key on the board', async ($, on) => {
+test('/mines brings the pane back and leaves the game in play as it is', async ($, on) => {
   const opened: Opened[] = []
   world(on, { opened })
   await $.session.start(SESSION)
-  await $.command.run(mines(''))
+  await $.command.run(mines())
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
 
-  await ui.press({ key: 'level-expert' })
-  expect(await ui.find({ type: 'Text', text: /^Mines 99\b/, in: 'board' })).toBeDefined()
-  expect(opened.at(-1)).toEqual({ rows: 20, columns: 64, closeOnEscape: undefined })
-
-  await ui.key({ key: 'i', in: 'board' })
-  expect(await ui.find({ type: 'Text', text: /^Mines 40\b/, in: 'board' })).toBeDefined()
-
-  // `/mines` alone brings the pane back and leaves the game as it is
+  // The first reveal, then /mines again: the pane opens once more, the game unchanged
   await ui.key({ key: ' ', in: 'board' })
-  await $.command.run(mines(''))
-  expect(await ui.find({ type: 'Text', text: /safe cells left\.$/, in: 'board' })).toBeDefined()
+  const before = opened.length
+  await $.command.run(mines())
+  expect(opened.length).toBe(before + 1)
+  expect(await ui.find({ type: 'Text', text: `${71 - started().opened} safe cells left.`, in: 'board' })).toBeDefined()
 })
 
 test('/mines asks for the keyboard again while the pane is open without it, and Escape never closes it', async ($, on) => {
@@ -611,7 +649,7 @@ test('/mines asks for the keyboard again while the pane is open without it, and 
   const pane = { isOpen: true, isFocused: false }
   const clock = world(on, { opened, pane })
   await $.session.start(SESSION)
-  await $.command.run(mines(''))
+  await $.command.run(mines())
   expect(opened.length).toBe(1)
   await clock.advance(250)
   expect(opened.length).toBe(2)
@@ -627,13 +665,13 @@ test('a pane the person closed is not reopened by the focus retries', async ($, 
   const opened: Opened[] = []
   const clock = world(on, { opened, pane: { isOpen: false, isFocused: false } })
   await $.session.start(SESSION)
-  await $.command.run(mines(''))
+  await $.command.run(mines())
   await clock.advance(5000)
   expect(opened.length).toBe(1)
 })
 
 test('every move newer than the last one played is played, in order, once', async () => {
-  const ready = newGame('beginner', SEED)
+  const ready = newGame(SEED)
   // Three presses that arrive in one redraw, the first one already played
   const acts = [
     { n: 1, type: 'right' },
@@ -655,7 +693,7 @@ test('every move newer than the last one played is played, in order, once', asyn
 test('the control buttons move the cursor and reveal there', async ($, on) => {
   world(on)
   await $.session.start(SESSION)
-  await $.command.run(mines('beginner ' + SEED))
+  await $.command.run(mines())
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.find({ type: 'Text', in: 'board' })
 
@@ -663,14 +701,14 @@ test('the control buttons move the cursor and reveal there', async ($, on) => {
   await ui.press({ key: 'right' })
   await ui.press({ key: 'down' })
   await ui.press({ key: 'reveal' })
-  const opened = reveal(newGame('beginner', SEED), 5 * 9 + 6)
+  const opened = reveal(newGame(SEED), 5 * 9 + 6)
   expect(await ui.find({ type: 'Text', text: `${71 - opened.opened} safe cells left.`, in: 'board' })).toBeDefined()
 })
 
 test('the clock starts on the first reveal, not when the board appears', async ($, on) => {
   world(on)
   await $.session.start(SESSION)
-  await $.command.run(mines('beginner ' + SEED))
+  await $.command.run(mines())
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.advance(600)
   await click(ui, FIRST)
@@ -681,10 +719,10 @@ test('the clock starts on the first reveal, not when the board appears', async (
 })
 
 test('a store that could not be read at start never loses a stored record', async ($, on) => {
-  const store: Record<string, unknown> = { best: { beginner: 5, expert: 500 } }
+  const store: Record<string, unknown> = { best: 5 }
   world(on, { store, failedReads: 1 })
   await $.session.start(SESSION)
-  await $.command.run(mines('beginner ' + SEED))
+  await $.command.run(mines())
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await click(ui, FIRST)
   await ui.advance(12000)
@@ -692,20 +730,19 @@ test('a store that could not be read at start never loses a stored record', asyn
 
   expect(await ui.find({ type: 'Text', text: 'Cleared in 0:12.', in: 'board' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Best 0:05/, in: 'board' })).toBeDefined()
-  expect(store.best).toEqual({ beginner: 5, expert: 500 })
+  expect(store.best).toBe(5)
 })
 
 test('where no board can draw, /mines says so', async ($, on) => {
   world(on, { surfaces: [] })
   await $.session.start(SESSION)
-  expect((await $.command.run(mines(''))).text).toBe(NO_BOARD)
-  expect((await $.command.run(mines('hard'))).text).toContain('Minefield does not know "hard"')
+  expect((await $.command.run(mines())).text).toBe(NO_BOARD)
 })
 
 test('the board draws in the desktop app, and a surface without it gets a line of text', async ($, on) => {
   world(on, { surfaces: ['desktop'] })
   await $.session.start(SESSION)
-  await $.command.run(mines('beginner ' + SEED))
+  await $.command.run(mines())
 
   const desktop = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await click(desktop, FIRST)

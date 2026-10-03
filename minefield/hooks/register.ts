@@ -1,6 +1,6 @@
 // minefield: Minesweeper in a pane.
 //
-// The hooks here deal the game (level, seed, best times) and open the pane;
+// The hooks here deal the game, keep the best time and open the pane;
 // board.ts, a surface module, plays it. No hook touches what the model
 // reads: there is no prompt, tool or attachment hook in this mod.
 //
@@ -10,8 +10,8 @@
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
 import type { BoardProps } from './board'
-import { CHROME_ROWS, LEVELS, LEVEL_NAMES, betterBest, bestOf, mergeBest, messageOf, paneSize, parseArgs } from './lib'
-import type { Act, Best, LevelName, MoveType, Win } from './lib'
+import { CHROME_ROWS, betterBest, bestOf, mergeBest, messageOf, paneSize } from './lib'
+import type { Act, Best, MoveType, Win } from './lib'
 
 const PANE = 'minefield'
 const BOARD = 'board'
@@ -39,11 +39,10 @@ const CONTROLS: readonly { type: MoveType; label: string; hotkey: string; isMove
 const MAX_ACTS = 32
 
 // The game the board is asked to play, the room the pane has for it, and
-// whether the screen is the fullscreen layout. In memory; best times are
+// whether the screen is the fullscreen layout. In memory; the best time is
 // also stored.
 const state: {
-  level: LevelName
-  seed: number | null
+  seed: number
   id: number
   best: Best
   columns: number
@@ -52,10 +51,9 @@ const state: {
   isFullscreen: boolean
   acts: readonly Act[]
 } = {
-  level: 'beginner',
-  seed: null,
+  seed: 0,
   id: 0,
-  best: {},
+  best: null,
   columns: 80,
   rows: 0,
   terminalColumns: 80,
@@ -84,7 +82,6 @@ export const register: Register = (on) => {
       await $.command.register({
         name: 'mines',
         description: 'Play Minefield in a pane',
-        argumentHint: '[beginner|intermediate|expert] [seed]',
         immediate: true,
       })
     } catch {
@@ -93,15 +90,13 @@ export const register: Register = (on) => {
     return result
   })
 
-  // `/mines` alone brings back the game in play; a level or a seed deals anew.
+  // `/mines` deals the first game and brings back the one in play after it.
   on('command.run', { command: 'mines' }, async ($, e) => {
-    const asked = parseArgs(e.args)
-    if ('error' in asked) return { text: asked.error }
     const surfaces = await $.session.surfaces()
     if (!surfaces.some(drawsBoard)) return { text: NO_BOARD }
     state.isFullscreen = e.presentation.isFullscreen
     state.terminalColumns = e.presentation.columns
-    if (state.id === 0 || asked.level !== null || asked.seed !== null) deal(asked.level ?? state.level, asked.seed)
+    if (state.id === 0) await deal($)
     await openPane($)
     focusSoon($, 0)
     return {}
@@ -117,19 +112,6 @@ export const register: Register = (on) => {
     state.rows = Math.max(0, e.props.scroll.bodyRows - CHROME_ROWS)
     if (e.viewport?.isFullscreen !== undefined) state.isFullscreen = e.viewport.isFullscreen
     if (e.viewport !== undefined) state.terminalColumns = e.viewport.columns
-    const levels = LEVEL_NAMES.map((name) =>
-      Button({
-        key: 'level-' + name,
-        label: LEVELS[name].label,
-        hotkey: LEVELS[name].hotkey,
-        plain: true,
-        dimColor: name !== state.level,
-        onPress: () => {
-          deal(name, null)
-          void openPane($)
-        },
-      }),
-    )
     const controls = CONTROLS.map((control) =>
       Button({
         key: control.type,
@@ -146,7 +128,6 @@ export const register: Register = (on) => {
     return Box({
       flexDirection: 'column',
       children: [
-        Box({ flexDirection: 'row', columnGap: 3, children: levels }),
         Text({ children: [' '] }),
         Client({ key: BOARD, module: './board.ts', props: boardProps() }),
         Box({ flexDirection: 'row', columnGap: 2, children: controls }),
@@ -155,17 +136,13 @@ export const register: Register = (on) => {
     })
   })
 
-  // The board reports a win, a level asked for by key, or both.
+  // The board reports a win.
   on('ui.message', async ($, e, next) => {
     const result = await next(e)
     if (e.requestId !== PANE || e.element !== BOARD) return result
     const message = messageOf(e.data)
     if (message === null) return result
-    if (message.won !== null) await recordWin($, message.won)
-    if (message.level !== null) {
-      deal(message.level, null)
-      await openPane($)
-    }
+    await recordWin($, message.won)
     return { props: boardProps() }
   })
 }
@@ -175,9 +152,14 @@ function drawsBoard(surface: RenderSurface): boolean {
   return surface === 'terminal' || surface === 'desktop'
 }
 
-function deal(level: LevelName, seed: number | null): void {
-  state.level = level
-  state.seed = seed
+// A new game, its mines laid from the time it is dealt. Without a clock,
+// the next game in line.
+async function deal($: EngineInterface): Promise<void> {
+  try {
+    state.seed = await $.clock.now()
+  } catch {
+    state.seed += 1
+  }
   state.id += 1
 }
 
@@ -189,7 +171,6 @@ function ask(type: MoveType): void {
 function boardProps(): BoardProps {
   return {
     id: state.id,
-    level: state.level,
     seed: state.seed,
     best: state.best,
     columns: state.columns,
@@ -202,7 +183,7 @@ function boardProps(): BoardProps {
 // so a read that failed at session start never costs a stored record; when
 // it cannot be read now, the time stands for this session only.
 async function recordWin($: EngineInterface, win: Win): Promise<void> {
-  const best = betterBest(state.best, win.level, win.seconds)
+  const best = betterBest(state.best, win.seconds)
   if (best === state.best) return
   state.best = best
   try {
@@ -214,9 +195,9 @@ async function recordWin($: EngineInterface, win: Win): Promise<void> {
   }
 }
 
-// Open the pane, or resize the open one, to fit the level's board.
+// Open the pane, or resize the open one, to fit the board.
 async function openPane($: EngineInterface): Promise<void> {
-  const size = paneSize(state.level, state.terminalColumns)
+  const size = paneSize(state.terminalColumns)
   try {
     await $.ui.open({ id: PANE, title: 'Minefield', focus: true, rows: size.rows, columns: size.columns })
   } catch {

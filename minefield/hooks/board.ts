@@ -1,6 +1,5 @@
 // minefield: the board, a surface module. It keeps the game in its local
-// state, takes the pointer and the keys, and reports wins and asked-for
-// levels to the hooks module.
+// state, takes the pointer and the keys, and reports wins to the hooks module.
 //
 // The board is drawn first, so a pointer position in the region is a board
 // position: nothing above it can push the rows down.
@@ -9,8 +8,7 @@ import type { ClientKeyEvent, ClientModule, ClientPointerEvent, ClientSurface } 
 
 import {
   FACE_WIDTH,
-  LEVELS,
-  LEVEL_NAMES,
+  SEPARATOR,
   act,
   applyActs,
   attend,
@@ -25,6 +23,7 @@ import {
   nextMood,
   outcomeLine,
   randomOf,
+  rowsFor,
   react,
   reactionTo,
   reveal,
@@ -33,15 +32,14 @@ import {
   tick,
   toggleFlag,
 } from './lib'
-import type { Act, Best, Fit, Game, LevelName, Mood, MoveType, Win } from './lib'
+import type { Act, Best, Fit, Game, Mood, MoveType } from './lib'
 
-// What the hooks module hands the board: which game to deal, the best times,
-// the room the pane has for it, and the moves the control buttons asked for,
-// oldest first.
+// What the hooks module hands the board: which game to deal and the number
+// its mines are laid from, the best time, the room the pane has for it, and
+// the moves the control buttons asked for, oldest first.
 export type BoardProps = {
   id: number
-  level: LevelName
-  seed: number | null
+  seed: number
   best: Best
   columns: number
   rows: number
@@ -72,11 +70,12 @@ const KEYS: Readonly<Record<string, MoveType>> = {
   n: 'new',
 }
 
-const LEVEL_KEYS: Readonly<Record<string, LevelName>> = Object.fromEntries(LEVEL_NAMES.map((name) => [LEVELS[name].hotkey, name]))
-
 const OUTCOME_COLORS: Readonly<Partial<Record<Game['status'], string>>> = { won: 'green', lost: 'red' }
 
 const BLANK = ' '
+
+// The maker's credit, after the status.
+const CREDIT = { href: 'https://github.com/reporails/cli', label: 'By Reporails' }
 
 // The board's one timer: five beats a second. The clock ticks every fifth
 // beat counted from the first reveal; the face's clock runs on every beat.
@@ -86,13 +85,11 @@ const BEATS_PER_SECOND = 5
 // Per instance, outside the game: none of these alone is worth a redraw.
 // `latest` is the newest game, so two events in one frame build on each
 // other; `beats` counts the timer; `started` is the beat of the first reveal;
-// `lastWin` is the newest win, sent with every report until the next one;
 // `moods` is the face's clock, `heard` the beat of the last move, and
 // `randoms` the face's dice, seeded from the first deal so tests can replay it.
 const latest = new WeakMap<Surface, Game>()
 const beats = new WeakMap<Surface, number>()
 const started = new WeakMap<Surface, number>()
-const lastWin = new WeakMap<Surface, Win>()
 const moods = new WeakMap<Surface, Mood>()
 const heard = new WeakMap<Surface, number>()
 const randoms = new WeakMap<Surface, () => number>()
@@ -109,10 +106,6 @@ function moodOf(surface: Surface, n: number, random: () => number): Mood {
   return moods.get(surface) ?? firstMood(n, random)
 }
 
-function report(surface: Surface, level: LevelName | null): void {
-  surface.post({ won: lastWin.get(surface) ?? null, level })
-}
-
 // Keep the game a change led to; start the clock on the first reveal, and
 // report a win.
 function settle(surface: Surface, before: Game, after: Game): void {
@@ -120,8 +113,7 @@ function settle(surface: Surface, before: Game, after: Game): void {
   surface.setState(after)
   if (before.status === 'ready' && after.status === 'playing') started.set(surface, beats.get(surface) ?? 0)
   if (after.status === 'won' && before.status !== 'won') {
-    lastWin.set(surface, { level: after.level, seconds: after.seconds })
-    report(surface, null)
+    surface.post({ won: { seconds: after.seconds } })
   }
 }
 
@@ -165,11 +157,6 @@ function pressed(game: Game, e: ClientPointerEvent, fit: Fit): Game {
 function typed(surface: Surface, e: ClientKeyEvent): void {
   if (e.ctrl || e.meta) return
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
-  const level = LEVEL_KEYS[key]
-  if (level !== undefined) {
-    report(surface, level)
-    return
-  }
   const type = KEYS[key]
   if (type !== undefined) moved(surface, (game) => act(game, type))
 }
@@ -187,24 +174,20 @@ function beat(surface: Surface): void {
   })
 }
 
-function randomSeed(): number {
-  return Math.floor(Math.random() * 4294967296)
-}
-
 // The newest move number the props carry, or 0.
 function lastActOf(acts: readonly Act[]): number {
   return acts.at(-1)?.n ?? 0
 }
 
 const Minefield: ClientModule<BoardProps, Game> = (props, surface) => {
-  const { Box, Text } = surface.elements
+  const { Box, Text, Link } = surface.elements
 
-  // A new deal from the hooks module (another level, another seed) starts
-  // over; each move a control button asked for is played once, in order.
+  // A new deal from the hooks module starts over; each move a control button
+  // asked for is played once, in order.
   let game = latest.get(surface) ?? surface.state
   if (game === undefined || game.id !== props.id) {
     const isFirst = game === undefined
-    game = { ...newGame(props.level, props.seed ?? randomSeed(), props.id), acted: lastActOf(props.acts) }
+    game = { ...newGame(props.seed, props.id), acted: lastActOf(props.acts) }
     latest.set(surface, game)
     started.delete(surface)
     surface.setState(game)
@@ -241,6 +224,7 @@ const Minefield: ClientModule<BoardProps, Game> = (props, surface) => {
     return Box({
       flexDirection: 'row',
       columnGap: 2,
+      minHeight: rowsFor(fit, game.rows),
       children: [
         Box({ flexDirection: 'column', flexShrink: 0, children: board }),
         Box({
@@ -250,6 +234,7 @@ const Minefield: ClientModule<BoardProps, Game> = (props, surface) => {
             faceColumn,
             Text({ children: [BLANK] }),
             ...statusParts(game, props.best).map((part) => Text({ bold: true, wrap: 'truncate-end', children: [part] })),
+            Text({ wrap: 'truncate-end', children: [Link(CREDIT)] }),
             Text({ ...outcomeStyle, wrap: 'wrap', children: [outcomeLine(game, props.best)] }),
           ],
         }),
@@ -259,7 +244,7 @@ const Minefield: ClientModule<BoardProps, Game> = (props, surface) => {
 
   const lines = [
     Text({ children: [BLANK] }),
-    Text({ bold: true, wrap: 'truncate-end', children: [statusLine(game, props.best)] }),
+    Text({ bold: true, wrap: 'truncate-end', children: [statusLine(game, props.best) + SEPARATOR, Link(CREDIT)] }),
     Text({ ...outcomeStyle, wrap: 'truncate-end', children: [outcomeLine(game, props.best)] }),
   ]
 

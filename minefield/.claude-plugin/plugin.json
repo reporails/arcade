@@ -1,7 +1,7 @@
 {
   "name": "minefield",
-  "version": "0.1.0",
-  "description": "The classic mine-clearing puzzle in a Claude Code pane: click or use the keys to clear the board while Claude works. Three levels, a timer, best times, and a face that watches the board and glances over at Claude's work.",
+  "version": "0.2.0",
+  "description": "The classic mine-clearing puzzle in a Claude Code pane: click or use the keys to clear the board while Claude works. A timer, a best time, and a face that watches the board and glances over at Claude's work.",
   "author": { "name": "Reporails", "url": "https://reporails.com" },
   "homepage": "https://github.com/reporails/arcade/tree/main/minefield",
   "repository": "https://github.com/reporails/arcade",
