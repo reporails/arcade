@@ -1,0 +1,4 @@
+{
+  "description": "The minefield hooks module",
+  "modules": ["./register.ts"]
+}

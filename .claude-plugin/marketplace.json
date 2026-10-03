@@ -1,0 +1,17 @@
+{
+  "name": "reporails-arcade",
+  "owner": {
+    "name": "Reporails",
+    "url": "https://reporails.com"
+  },
+  "metadata": {
+    "description": "Classic desktop games as Claude Code mods, played in a pane while Claude works."
+  },
+  "plugins": [
+    {
+      "name": "minefield",
+      "source": "./minefield",
+      "description": "The classic mine-clearing puzzle in a pane: click or use the keys to clear the board. Three levels, a timer, best times, and a face that watches the board and glances over at Claude's work."
+    }
+  ]
+}

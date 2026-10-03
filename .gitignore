@@ -1,0 +1,5 @@
+# Claude Code writes these: `/plugin-types` into .claude/types/, and loading a
+# mod into its own folder. Each build writes its own, so none is committed.
+.claude/types/
+*/.claude-plugin/types/
+*/tsconfig.json

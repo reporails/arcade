@@ -1,0 +1,71 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The typecheck, on the one build that writes its mod typings without a
+  # login: one build for the typings, the engine and the test kit, so they
+  # cannot disagree. Mods are early access on it, behind the switch.
+  typecheck:
+    runs-on: ubuntu-latest
+    env:
+      CLAUDE_CODE_VERSION: 2.1.285
+      CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1'
+      DISABLE_AUTOUPDATER: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Write the mod typings for that build
+        run: claude -p "/plugin-types" < /dev/null
+
+      - name: Typecheck
+        run: npx -y -p typescript@5.9.3 tsc -p .
+
+      - name: Validate and test each game
+        run: |
+          for manifest in */.claude-plugin/plugin.json; do
+            game="${manifest%/.claude-plugin/plugin.json}"
+            claude plugin validate --strict "$game"
+            claude plugin test "$game"
+          done
+
+  # The games on a build where mods are on by default, as players run them.
+  # From 2.1.287 `claude -p` asks for a login, so this job writes no typings.
+  release:
+    runs-on: ubuntu-latest
+    env:
+      CLAUDE_CODE_VERSION: 2.1.288
+      DISABLE_AUTOUPDATER: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Validate the marketplace
+        run: claude plugin validate --strict .
+
+      - name: Validate and test each game
+        run: |
+          for manifest in */.claude-plugin/plugin.json; do
+            game="${manifest%/.claude-plugin/plugin.json}"
+            claude plugin validate --strict "$game"
+            claude plugin test "$game"
+          done
