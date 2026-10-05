@@ -3,3 +3,11 @@
 .claude/types/
 */.claude-plugin/types/
 */tsconfig.json
+
+# doom: the engine's save games and config, its object files and the engine
+# `make` builds when no prebuilt one fits, and local test helpers.
+doom/data/
+doom/engine/build/
+doom/engine/doom-claude
+doom/engine/doom-claude.exe
+doom/dev/

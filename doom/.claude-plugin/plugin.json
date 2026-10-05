@@ -1,0 +1,10 @@
+{
+  "name": "doom",
+  "version": "0.1.0",
+  "description": "Doom in a Claude Code pane: Freedoom on the doomgeneric engine, a real picture in kitty and Ghostty and block characters elsewhere, played with the keys and the mouse while Claude works. Prebuilt engines for Linux, macOS and Windows.",
+  "author": { "name": "Reporails", "url": "https://reporails.com" },
+  "homepage": "https://github.com/reporails/arcade/tree/main/doom",
+  "repository": "https://github.com/reporails/arcade",
+  "license": "MIT AND GPL-2.0-or-later AND BSD-3-Clause",
+  "keywords": ["game", "doom", "freedoom", "mod"]
+}

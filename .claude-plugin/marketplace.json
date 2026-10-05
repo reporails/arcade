@@ -12,6 +12,11 @@
       "name": "minefield",
       "source": "./minefield",
       "description": "The classic mine-clearing puzzle in a pane: click or use the keys to clear the board. A timer, a best time, and a face that watches the board and glances over at Claude's work."
+    },
+    {
+      "name": "doom",
+      "source": "./doom",
+      "description": "Doom in a pane: Freedoom on the doomgeneric engine, a real picture in kitty and Ghostty, block characters elsewhere. Walk with the keys, turn with the mouse or the keys, while Claude works."
     }
   ]
 }

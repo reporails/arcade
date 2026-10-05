@@ -24,6 +24,9 @@ Classic desktop games as Claude Code mods, played in a pane while Claude works.
 | Game | What it is |
 |---|---|
 | [`minefield`](minefield/) | Minesweeper. Click or use the keys to clear the board, with a best time and a face that watches the cursor and glances over at the transcript now and then. Run `/mines`. |
+| [`doom`](doom/) | Doom, as Freedoom on the doomgeneric engine: a real picture in kitty and Ghostty, block characters elsewhere. Walk with the keys, turn with the mouse or the keys. Prebuilt engines for Linux, macOS and Windows; played on Linux so far. Run `/doom`. |
+
+![Doom docked beside a Claude Code session in kitty: Freedoom's first level in the pane, Claude's answer in the transcript (rendered from the session's screen cells and the engine's frame)](docs/doom.png)
 
 Each game is its own plugin, so you install only the ones you want.
 
@@ -53,7 +56,10 @@ Then run the game's command, such as `/mines`.
 
 ## What a game can see
 
-These mods draw a pane and keep a best time in their own store. They hook no prompt, tool or attachment, so they read and change nothing the model sees, and they make no network calls. Run `claude plugin validate <game>` to list exactly what a game hooks and calls, before any of its code runs.
+These mods draw a pane and keep their state in their own store. They hook no tool or attachment and read nothing the model sees. Run `claude plugin validate <game>` to list exactly what a game hooks and calls, before any of its code runs.
+
+- `minefield` hooks no prompt and makes no network calls.
+- `doom` runs its engine as a child process and talks to it on your machine only, over a Unix socket or 127.0.0.1 with a per-run token. While you play it hooks the prompt box, so game keys that land there go to Doom instead; type `/` to have the prompt back. Its engine is GPL-2.0-or-later and its game data BSD; see [its README](doom/README.md#licence).
 
 What the model does read is your `CLAUDE.md` and the rest of your instructions. To see which of them Claude actually follows: [reporails.com](https://reporails.com/?utm_source=arcade&utm_medium=readme).
 
