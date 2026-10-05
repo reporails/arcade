@@ -132,7 +132,7 @@ The face runs on the board's own timer, five beats a second, as pure functions i
 ## If it does not start
 
 - `claude --version` must be 2.1.287 or later.
-- `/plugin` shows a dim `mod active` line naming the mods that loaded. If minefield is not on it, run `claude plugin test` in an empty folder: `no hooks module to load` means mods load for you; `hooks modules are turned off` means Anthropic has them off for your account, and no local setting changes that. An organization can also limit which mods load (`allowManagedModsOnly`).
+- `/plugin` shows a dim `mod active` line naming the mods that loaded. If minefield is not on it, run `claude plugin test` in an empty folder: `no hooks module to load` means mods load for you; `hooks modules are turned off here` means a setting blocks them (`disableAllHooks` in your settings, or your organization's policy); `hooks modules are turned off in this process` means Anthropic has them off for your account, and no local setting changes that. An organization can also limit which mods load (`allowManagedModsOnly`).
 - In VS Code's chat panel and `claude -p` there is nothing to draw a board on; `/mines` says so.
 
 Made by [Reporails](https://reporails.com/?utm_source=arcade&utm_medium=readme), diagnostics for the instructions that steer Claude Code. MIT.
